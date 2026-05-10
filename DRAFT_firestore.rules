@@ -1,0 +1,84 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 3. Primitives
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // --- Product Templates ---
+    match /products/{productId} {
+      allow read: if true;
+      // Writing restricted for now, only via manual console or hypothetical admin
+      allow write: if false;
+    }
+
+    // --- User Assets: Logos ---
+    match /users/{userId}/logos/{logoId} {
+      allow list: if isOwner(userId);
+      allow get: if isOwner(userId);
+      
+      function isValidLogo(data) {
+        return data.keys().hasAll(['id', 'imageUrl', 'ownerId', 'createdAt'])
+          && data.keys().size() == 4
+          && data.id is string && data.id.size() <= 128
+          && data.imageUrl is string && data.imageUrl.size() <= 2048
+          && data.ownerId == request.auth.uid
+          && data.createdAt is timestamp;
+      }
+
+      allow create: if isOwner(userId) && isValidLogo(incoming());
+      allow update: if isOwner(userId) && isValidLogo(incoming())
+        && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'updatedAt']);
+      allow delete: if isOwner(userId);
+    }
+
+    // --- User Assets: Mockups ---
+    match /users/{userId}/mockups/{mockupId} {
+      allow list: if isOwner(userId);
+      allow get: if isOwner(userId);
+
+      function isValidMockup(data) {
+        return data.keys().hasAll(['id', 'ownerId', 'status', 'createdAt'])
+          && data.keys().size() >= 4
+          && data.id is string && data.id.size() <= 128
+          && data.ownerId == request.auth.uid
+          && data.status in ['processing', 'completed', 'failed']
+          && (data.status != 'completed' || data.keys().hasAll(['resultUrl', 'logoId', 'productId']))
+          && data.createdAt is timestamp;
+      }
+
+      allow create: if isOwner(userId) && isValidMockup(incoming());
+      allow update: if isOwner(userId) && isValidMockup(incoming())
+        && (
+          // Action: Mark completed
+          (incoming().status == 'completed' && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'resultUrl', 'logoId', 'productId', 'updatedAt'])) ||
+          // Action: Rename or something (if needed)
+          (incoming().diff(existing()).affectedKeys().hasOnly(['name', 'updatedAt']))
+        )
+        && existing().status != 'completed'; // Terminal state locking (example)
+      allow delete: if isOwner(userId);
+    }
+  }
+}

@@ -1,0 +1,95 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Global Helpers ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // --- Product Templates ---
+    match /products/{productId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // --- User Assets: Logos ---
+    match /users/{userId}/logos/{logoId} {
+      // Identity check first, then path hardening
+      allow list: if isOwner(userId);
+      allow get: if isOwner(userId) && isValidId(userId) && isValidId(logoId);
+      
+      function isValidLogo(data) {
+        return data.keys().hasAll(['id', 'imageUrl', 'ownerId', 'createdAt'])
+          && data.keys().size() >= 4
+          && data.id is string && data.id.size() <= 128
+          && data.imageUrl is string && data.imageUrl.size() <= 1048576
+          && data.ownerId == request.auth.uid
+          && data.createdAt == request.time;
+      }
+
+      allow create: if isOwner(userId) && isValidLogo(incoming());
+      
+      allow update: if isOwner(userId) && isValidLogo(incoming())
+        && incoming().ownerId == existing().ownerId // Immutable owner
+        && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'imageUrl', 'updatedAt']);
+        
+      allow delete: if isOwner(userId);
+    }
+
+    // --- User Assets: Mockups ---
+    match /users/{userId}/mockups/{mockupId} {
+      allow list: if isOwner(userId);
+      allow get: if isOwner(userId) && isValidId(userId) && isValidId(mockupId);
+
+      function isValidMockup(data) {
+        return data.keys().hasAll(['id', 'ownerId', 'status', 'createdAt'])
+          && data.keys().size() >= 4
+          && data.id is string && data.id.size() <= 128
+          && data.ownerId == request.auth.uid
+          && data.status in ['processing', 'completed', 'failed']
+          && (data.status != 'completed' || data.keys().hasAll(['resultUrl', 'logoId', 'productId']))
+          && data.createdAt == request.time;
+      }
+
+      allow create: if isOwner(userId) && isValidMockup(incoming());
+      
+      allow update: if isOwner(userId) && isValidMockup(incoming())
+        && incoming().ownerId == existing().ownerId
+        && (
+          // Action: Mark completed
+          (incoming().status == 'completed' && existing().status == 'processing' 
+           && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'resultUrl', 'logoId', 'productId', 'updatedAt'])) ||
+          // Action: Rename
+          (incoming().diff(existing()).affectedKeys().hasOnly(['name', 'updatedAt']))
+        )
+        && existing().status != 'completed'; // Terminal locking
+        
+      allow delete: if isOwner(userId);
+    }
+  }
+}

@@ -1,0 +1,59 @@
+{
+  "entities": {
+    "ProductBase": {
+      "title": "Product Base",
+      "description": "A template product image (e.g. t-shirt, mug) to apply logos onto.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "category": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "imageUrl"]
+    },
+    "Logo": {
+      "title": "Logo Asset",
+      "description": "User uploaded logo to be placed on mockups.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "imageUrl", "ownerId"]
+    },
+    "Mockup": {
+      "title": "Generated Mockup",
+      "description": "The result of AI compositing a logo onto a product.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "logoId": { "type": "string" },
+        "productId": { "type": "string" },
+        "resultUrl": { "type": "string" },
+        "status": { "type": "string", "enum": ["processing", "completed", "failed"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerId", "status"]
+    }
+  },
+  "firestore": {
+    "/products": {
+      "schema": "ProductBase",
+      "description": "Public or shared product templates."
+    },
+    "/users/{userId}/logos": {
+      "schema": "Logo",
+      "description": "User specific logo assets."
+    },
+    "/users/{userId}/mockups": {
+      "schema": "Mockup",
+      "description": "User generated mockups."
+    }
+  }
+}
